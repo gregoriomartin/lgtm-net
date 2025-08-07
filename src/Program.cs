@@ -5,39 +5,20 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
-using Serilog.Events;
-using Serilog.Formatting.Compact;
-using DotNetApi.Services;
-
-// Configure Serilog
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Debug()
-    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-    .Enrich.FromLogContext()
-    .Enrich.WithEnvironmentName()
-    .Enrich.WithMachineName()
-    .Enrich.WithThreadId()
-    .Enrich.WithProcessId()
-    .Enrich.WithProcessName()
-    .Enrich.WithProperty("ApplicationName", "logging-app")
-    .Enrich.WithProperty("Environment", Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production")
-    .WriteTo.Console(new CompactJsonFormatter())
-    .CreateLogger();
+using LoggingApp.Services;
 
 try
 {
     Log.Information("Starting DotNetApi application");
-    
+
     var builder = WebApplication.CreateBuilder(args);
 
+    var logger = new LoggerConfiguration()
+        .ReadFrom.Configuration(builder.Configuration)
+        .CreateLogger();
+
     // Add Serilog
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .Enrich.WithProperty("ApplicationName", "logging-app")
-        .WriteTo.Console(new CompactJsonFormatter()));
+    builder.Host.UseSerilog(logger);
 
     // Configure OpenTelemetry
     var otelEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http://otel-collector:4318";
@@ -76,7 +57,6 @@ try
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
-                .AddProcessInstrumentation()
                 .AddMeter(serviceName)
                 .AddOtlpExporter(options =>
                 {
@@ -89,10 +69,10 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
     builder.Services.AddHealthChecks();
-    builder.Services.AddSingleton<DataService>();
     builder.Services.AddSingleton<ActivitySource>(new ActivitySource(serviceName, serviceVersion));
     builder.Services.AddSingleton<Meter>(new Meter(serviceName, serviceVersion));
     builder.Services.AddHttpClient();
+    builder.Services.AddHostedService<LogGeneratorService>();
 
     var app = builder.Build();
 
@@ -112,7 +92,7 @@ try
             diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value);
             diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
             diagnosticContext.Set("UserAgent", httpContext.Request.Headers["User-Agent"].ToString());
-            diagnosticContext.Set("RemoteIpAddress", httpContext.Connection.RemoteIpAddress);
+            diagnosticContext.Set("RemoteIpAddress", httpContext.Connection.RemoteIpAddress?.ToString() ?? "");
             diagnosticContext.Set("RequestId", Activity.Current?.Id ?? httpContext.TraceIdentifier);
         };
     });

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System;
 using System.Diagnostics;
 
 namespace LoggingApp.Controllers;
@@ -45,10 +46,18 @@ public class LogController : ControllerBase
         using var activity = _activitySource.StartActivity("LogError");
         activity?.SetTag("log.level", "error");
         activity?.SetTag("log.message", message);
-        
-        var exception = new InvalidOperationException($"Simulated error: {message}");
-        activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
-        _logger.LogError(exception, "Error log: {Message} from {Source}", message, "API");
+
+        try
+        {
+            var arr = new int[2];
+            var fail = arr[5];
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            _logger.LogError(ex, "Error log: {Message} from {Source}", message, "API");
+        }
+
         return Ok(new { level = "Error", message, timestamp = DateTime.UtcNow });
     }
 
