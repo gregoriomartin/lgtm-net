@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logging-app
+  labels:
+    app: logging-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logging-app
+  template:
+    metadata:
+      labels:
+        app: logging-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: logging-app
+        image: logging-app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Development"
+        - name: ASPNETCORE_URLS
+          value: "http://+:8080"
+        - name: OpenTelemetry__Endpoint
+          value: "http://alloy.observability.svc.cluster.local:4317"
+        - name: OpenTelemetry__ServiceName
+          value: "logging-app"
+        - name: OpenTelemetry__ServiceVersion
+          value: "1.0.0"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+        - name: appsettings
+          mountPath: /app/appsettings.json
+          subPath: appsettings.json
+          readOnly: true
+      volumes:
+      - name: app-logs
+        emptyDir: {}
+      - name: appsettings
+        configMap:
+          name: logging-app-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logging-app-service
+  labels:
+    app: logging-app
+spec:
+  type: ClusterIP
+  selector:
+    app: logging-app
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logging-app-nodeport
+  labels:
+    app: logging-app
+spec:
+  type: NodePort
+  selector:
+    app: logging-app
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30080
+    protocol: TCP
+    name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logging-app-config
+data:
+  appsettings.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "Serilog": {
+        "MinimumLevel": {
+          "Default": "Information",
+          "Override": {
+            "Microsoft": "Information",
+            "Microsoft.AspNetCore": "Information",
+            "System": "Information"
+          }
+        },
+        "WriteTo": [
+          {
+            "Name": "Console",
+            "Args": {
+              "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}<s:{SourceContext}>{Properties:j}{NewLine}{Exception}"
+            }
+          },
+          {
+            "Name": "File",
+            "Args": {
+              "path": "app/logs/logging-app-.json",
+              "rollingInterval": "Day",
+              "formatter": "Serilog.Formatting.Compact.CompactJsonFormatter, Serilog.Formatting.Compact",
+            }
+          }
+        ],
+        "Using": [
+          "Serilog.Sinks.Console",
+          "Serilog.Sinks.File",
+          "Serilog.Enrichers.Environment",
+          "Serilog.Enrichers.HttpContext",
+          "Serilog.Enrichers.Thread",
+          "Serilog.Enrichers.Process",
+          "Serilog.Exceptions",
+          "Serilog.Enrichers.ClientInfo"
+        ],
+        "Enrich": [
+          "FromLogContext",
+          "WithMachineName",
+          "WithEnvironmentUserName",
+          "WithEnvironmentName",
+          "WithProcessName",
+          "WithHttpRequestId",
+          "WithExceptionDetails",
+          "WithClientIp",
+          "WithCorrelationId",
+          {
+            "Name": "WithRequestHeader",
+            "Args": { "headerName": "User-Agent" }
+          }
+        ],
+        "Properties": {
+          "Application": "LoggingApp",
+          "Environment": "Development"
+        }
+      },
+      "AllowedHosts": "*",
+      "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318"
+    }

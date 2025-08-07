@@ -1,14 +1,14 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: flask-app-monitor
+  name: logging-app-monitor
   namespace: monitoring
   labels:
     release: prometheus-operator
 spec:
   selector:
     matchLabels:
-      app: flask-app
+      app: logging-app
   podMetricsEndpoints:
   - port: "8888"
     path: /metrics

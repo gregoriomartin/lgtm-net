@@ -17,34 +17,27 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Color functions for output
-function Write-Success {
-    Write-Host $args[0] -ForegroundColor Green
-}
+# ========================================
+# LGTM Stack Installation Script
+# ========================================
 
-function Write-Info {
-    Write-Host $args[0] -ForegroundColor Cyan
-}
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "LGTM Stack Installation Script" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+Write-Host "Installing to namespace: $Namespace" -ForegroundColor Cyan
 
-function Write-Warning {
-    Write-Host $args[0] -ForegroundColor Yellow
-}
+# ========================================
+# STEP 1: Check Prerequisites
+# ========================================
 
-function Write-Error {
-    Write-Host $args[0] -ForegroundColor Red
-}
-
-function Write-Header {
+if (-not $SkipPrerequisites) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host $args[0] -ForegroundColor Magenta
+    Write-Host "Checking Prerequisites" -ForegroundColor Magenta
     Write-Host "========================================" -ForegroundColor Magenta
     Write-Host ""
-}
-
-# Check prerequisites
-function Test-Prerequisites {
-    Write-Header "Checking Prerequisites"
     
     $prerequisites = @{
         "kubectl" = "Kubernetes CLI tool for managing clusters"
@@ -54,43 +47,43 @@ function Test-Prerequisites {
     $missingTools = @()
     
     foreach ($tool in $prerequisites.Keys) {
-        Write-Info "Checking for $tool..."
+        Write-Host "Checking for $tool..." -ForegroundColor Cyan
         
         try {
-            $version = & $tool version --short 2>&1
+            $version = & $tool version
             if ($LASTEXITCODE -eq 0) {
-                Write-Success "  ✓ $tool is installed: $version"
+                Write-Host "  ✓ $tool is installed: $version" -ForegroundColor Green
             } else {
                 throw
             }
         }
         catch {
-            Write-Error "  ✗ $tool is not installed or not in PATH"
-            Write-Warning "    Description: $($prerequisites[$tool])"
+            Write-Host "  ✗ $tool is not installed or not in PATH" -ForegroundColor Red
+            Write-Host "    Description: $($prerequisites[$tool])" -ForegroundColor Yellow
             $missingTools += $tool
         }
     }
     
     # Check Kubernetes connectivity
-    Write-Info "Checking Kubernetes cluster connectivity..."
+    Write-Host "Checking Kubernetes cluster connectivity..." -ForegroundColor Cyan
     try {
         $clusterInfo = kubectl cluster-info 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Success "  ✓ Connected to Kubernetes cluster"
+            Write-Host "  ✓ Connected to Kubernetes cluster" -ForegroundColor Green
             kubectl version --short
         } else {
             throw
         }
     }
     catch {
-        Write-Error "  ✗ Cannot connect to Kubernetes cluster"
-        Write-Warning "    Ensure you have a valid kubeconfig and cluster access"
+        Write-Host "  ✗ Cannot connect to Kubernetes cluster" -ForegroundColor Red
+        Write-Host "    Ensure you have a valid kubeconfig and cluster access" -ForegroundColor Yellow
         $missingTools += "kubernetes-connection"
     }
     
     if ($missingTools.Count -gt 0) {
         Write-Host ""
-        Write-Error "Prerequisites check failed!"
+        Write-Host "Prerequisites check failed!" -ForegroundColor Red
         Write-Host ""
         Write-Host "Installation instructions:" -ForegroundColor Yellow
         
@@ -107,177 +100,244 @@ function Test-Prerequisites {
         exit 1
     }
     
-    Write-Success "`n✓ All prerequisites met!"
+    Write-Host "`n✓ All prerequisites met!" -ForegroundColor Green
 }
 
-# Add Helm repositories
-function Add-HelmRepositories {
-    Write-Header "Adding Helm Repositories"
-    
-    $repositories = @{
-        "prometheus-community" = "https://prometheus-community.github.io/helm-charts"
-        "grafana" = "https://grafana.github.io/helm-charts"
-    }
-    
-    foreach ($repo in $repositories.Keys) {
-        Write-Info "Adding $repo repository..."
-        helm repo add $repo $repositories[$repo] 2>&1 | Out-String | Write-Verbose
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "  ✓ Added $repo repository"
-        } else {
-            Write-Error "  ✗ Failed to add $repo repository"
-            exit 1
-        }
-    }
-    
-    Write-Info "Updating Helm repositories..."
-    helm repo update 2>&1 | Out-String | Write-Verbose
-    Write-Success "  ✓ Repositories updated"
+# ========================================
+# STEP 2: Add Helm Repositories
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Adding Helm Repositories" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+$repositories = @{
+    "prometheus-community" = "https://prometheus-community.github.io/helm-charts"
+    "grafana" = "https://grafana.github.io/helm-charts"
 }
 
-# Create namespace
-function New-Namespace {
-    param([string]$Namespace)
-    
-    Write-Header "Creating Namespace"
-    
-    Write-Info "Checking if namespace '$Namespace' exists..."
-    $nsExists = kubectl get namespace $Namespace --ignore-not-found 2>&1
-    
-    if ($nsExists) {
-        Write-Warning "  Namespace '$Namespace' already exists"
-    } else {
-        Write-Info "Creating namespace '$Namespace'..."
-        kubectl create namespace $Namespace
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "  ✓ Created namespace '$Namespace'"
-        } else {
-            Write-Error "  ✗ Failed to create namespace"
-            exit 1
-        }
-    }
-}
-
-# Install Prometheus Operator
-function Install-PrometheusOperator {
-    param([string]$Namespace)
-    
-    Write-Header "Installing Prometheus Operator"
-    
-    $valuesFile = Join-Path $PSScriptRoot ".." "helm" "values-prometheus.yaml"
-    
-    if (-not (Test-Path $valuesFile)) {
-        Write-Warning "  values-prometheus.yaml not found, using default values"
-        $valuesParam = ""
-    } else {
-        $valuesParam = "-f `"$valuesFile`""
-    }
-    
-    Write-Info "Installing Prometheus Operator..."
-    $installCmd = "helm upgrade --install prometheus-operator prometheus-community/kube-prometheus-stack --version 66.3.1 -n $Namespace $valuesParam --wait --timeout 10m"
-    
-    Invoke-Expression $installCmd
-    
+foreach ($repo in $repositories.Keys) {
+    Write-Host "Adding $repo repository..." -ForegroundColor Cyan
+    helm repo add $repo $repositories[$repo] 2>&1 | Out-String | Write-Verbose
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "  ✓ Prometheus Operator installed successfully"
+        Write-Host "  ✓ Added $repo repository" -ForegroundColor Green
     } else {
-        Write-Error "  ✗ Failed to install Prometheus Operator"
+        Write-Host "  ✗ Failed to add $repo repository" -ForegroundColor Red
         exit 1
     }
 }
 
-# Install LGTM Stack
-function Install-LGTMStack {
-    param([string]$Namespace)
-    
-    Write-Header "Installing LGTM Stack"
-    
-    $valuesFile = Join-Path $PSScriptRoot ".." "helm" "values-lgtm.local.yaml"
-    
-    if (-not (Test-Path $valuesFile)) {
-        Write-Warning "  values-lgtm.local.yaml not found, using default values"
-        $valuesParam = ""
-    } else {
-        $valuesParam = "-f `"$valuesFile`""
-    }
-    
-    Write-Info "Installing LGTM Stack (this may take several minutes)..."
-    $installCmd = "helm upgrade --install lgtm grafana/lgtm-distributed --version 2.1.0 -n $Namespace $valuesParam --wait --timeout 15m"
-    
-    Invoke-Expression $installCmd
-    
+Write-Host "Updating Helm repositories..." -ForegroundColor Cyan
+helm repo update 2>&1 | Out-String | Write-Verbose
+Write-Host "  ✓ Repositories updated" -ForegroundColor Green
+
+# ========================================
+# STEP 3: Create Namespace
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Creating Namespace" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+Write-Host "Checking if namespace '$Namespace' exists..." -ForegroundColor Cyan
+$nsExists = kubectl get namespace $Namespace --ignore-not-found 2>&1
+
+if ($nsExists) {
+    Write-Host "  Namespace '$Namespace' already exists" -ForegroundColor Yellow
+} else {
+    Write-Host "Creating namespace '$Namespace'..." -ForegroundColor Cyan
+    kubectl create namespace $Namespace
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "  ✓ LGTM Stack installed successfully"
+        Write-Host "  ✓ Created namespace '$Namespace'" -ForegroundColor Green
     } else {
-        Write-Error "  ✗ Failed to install LGTM Stack"
+        Write-Host "  ✗ Failed to create namespace" -ForegroundColor Red
         exit 1
     }
 }
 
-# Deploy additional components
-function Deploy-AdditionalComponents {
-    param([string]$Namespace)
-    
-    Write-Header "Deploying Additional Components"
-    
-    $manifestsPath = Join-Path $PSScriptRoot ".." "manifests"
-    
-    # Deploy OpenTelemetry Collector
-    $otelFile = Join-Path $manifestsPath "otel-collector.yaml"
-    if (Test-Path $otelFile) {
-        Write-Info "Deploying OpenTelemetry Collector..."
-        kubectl apply -f $otelFile -n $Namespace
-        Write-Success "  ✓ OpenTelemetry Collector deployed"
-    }
-    
-    # Deploy Promtail
-    $promtailFile = Join-Path $manifestsPath "promtail.docker.yaml"
-    if (Test-Path $promtailFile) {
-        Write-Info "Deploying Promtail..."
-        kubectl apply -f $promtailFile
-        Write-Success "  ✓ Promtail deployed"
-    }
-    
-    # Deploy .NET API application
-    $appPath = Join-Path $manifestsPath "src"
-    if (Test-Path $appPath) {
-        Write-Info "Deploying .NET API application..."
-        kubectl apply -f $appPath -n $Namespace
-        Write-Success "  ✓ .NET API application deployed"
-    }
+# ========================================
+# STEP 4: Install Prometheus Operator
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Installing Prometheus Operator" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+$valuesFile = Join-Path $PSScriptRoot "helm-values" "prometheus.yaml"
+
+if (-not (Test-Path $valuesFile)) {
+    Write-Host "  prometheus.yaml not found, using default values" -ForegroundColor Yellow
+    $valuesParam = ""
+} else {
+    $valuesParam = "-f `"$valuesFile`""
 }
 
-# Main execution
-function Main {
-    Write-Header "LGTM Stack Installation Script"
-    Write-Info "Installing to namespace: $Namespace"
-    
-    if (-not $SkipPrerequisites) {
-        Test-Prerequisites
-    }
-    
-    Add-HelmRepositories
-    New-Namespace -Namespace $Namespace
-    Install-PrometheusOperator -Namespace $Namespace
-    Install-LGTMStack -Namespace $Namespace
-    Deploy-AdditionalComponents -Namespace $Namespace
-    
-    Write-Header "Installation Complete!"
-    
-    Write-Success "The LGTM Stack has been successfully installed!"
-    Write-Host ""
-    Write-Info "Next steps:"
-    Write-Host "  1. Get Grafana admin password:"
-    Write-Host "     kubectl get secret --namespace $Namespace lgtm-grafana -o jsonpath=`"{.data.admin-password}`" | Out-String | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(`$_)) }"
-    Write-Host ""
-    Write-Host "  2. Access Grafana:"
-    Write-Host "     kubectl port-forward svc/lgtm-grafana 3000:80 -n $Namespace"
-    Write-Host "     Open browser: http://localhost:3000"
-    Write-Host "     Username: admin"
-    Write-Host ""
-    Write-Host "  3. Test services:"
-    Write-Host "     .\test-services.ps1"
+Write-Host "Installing Prometheus Operator..." -ForegroundColor Cyan
+$installCmd = "helm upgrade --install prometheus-operator prometheus-community/kube-prometheus-stack --version 66.3.1 -n $Namespace $valuesParam --wait --timeout 10m"
+
+Invoke-Expression $installCmd
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  ✓ Prometheus Operator installed successfully" -ForegroundColor Green
+} else {
+    Write-Host "  ✗ Failed to install Prometheus Operator" -ForegroundColor Red
+    exit 1
 }
 
-# Run main function
-Main
+# ========================================
+# STEP 5: Install LGTM Stack
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Installing LGTM Stack" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+$valuesFile = Join-Path $PSScriptRoot  "helm-values" "lgtm.yaml"
+
+if (-not (Test-Path $valuesFile)) {
+    Write-Host "  lgtm.yaml not found, using default values" -ForegroundColor Yellow
+    $valuesParam = ""
+} else {
+    $valuesParam = "-f `"$valuesFile`""
+}
+
+Write-Host "Installing LGTM Stack (this may take several minutes)..." -ForegroundColor Cyan
+$installCmd = "helm upgrade --install lgtm grafana/lgtm-distributed --version 2.1.0 -n $Namespace $valuesParam --wait --timeout 15m"
+
+Invoke-Expression $installCmd
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  ✓ LGTM Stack installed successfully" -ForegroundColor Green
+} else {
+    Write-Host "  ✗ Failed to install LGTM Stack" -ForegroundColor Red
+    exit 1
+}
+
+# ========================================
+# STEP 6: Deploy Additional Components
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Deploying Additional Components" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+$manifestsPath = Join-Path $PSScriptRoot "manifests"
+
+# Deploy OpenTelemetry Collector
+$otelFile = Join-Path $manifestsPath "otel-collector.yaml"
+if (Test-Path $otelFile) {
+    Write-Host "Deploying OpenTelemetry Collector..." -ForegroundColor Cyan
+    kubectl apply -f $otelFile
+    Write-Host "  ✓ OpenTelemetry Collector deployed" -ForegroundColor Green
+}
+
+# Deploy Promtail
+$promtailFile = Join-Path $manifestsPath "promtail.yaml"
+if (Test-Path $promtailFile) {
+    Write-Host "Deploying Promtail..." -ForegroundColor Cyan
+    kubectl apply -f $promtailFile
+    Write-Host "  ✓ Promtail deployed" -ForegroundColor Green
+}
+
+# ========================================
+# STEP 7: Build and Deploy Logging Application
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Building and Deploying Logging Application" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+# Build Docker image from src folder
+$srcPath = Join-Path $PSScriptRoot "src"
+if (Test-Path $srcPath) {
+    Write-Host "Building Docker image from src folder..." -ForegroundColor Cyan
+    
+    # Change to src directory to build the image
+    Push-Location $srcPath
+    try {
+        docker build -t logging-app:latest .
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ Docker image built successfully" -ForegroundColor Green
+        } else {
+            Write-Host "  ✗ Failed to build Docker image" -ForegroundColor Red
+            Pop-Location
+            exit 1
+        }
+    }
+    finally {
+        Pop-Location
+    }
+} else {
+    Write-Host "  ✗ src folder not found" -ForegroundColor Red
+    exit 1
+}
+
+# Deploy logging application
+$appPath = Join-Path $manifestsPath "app"
+$loggingAppFile = Join-Path $appPath "logging-app.yaml"
+if (Test-Path $loggingAppFile) {
+    Write-Host "Deploying logging application..." -ForegroundColor Cyan
+    kubectl apply -f $loggingAppFile
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✓ Logging application deployed" -ForegroundColor Green
+    } else {
+        Write-Host "  ✗ Failed to deploy logging application" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "  ✗ logging-app.yaml not found in manifests/app/" -ForegroundColor Red
+    exit 1
+}
+
+# Deploy PodMonitor for metrics collection
+$podMonitorFile = Join-Path $appPath "podmonitor.yaml"
+if (Test-Path $podMonitorFile) {
+    Write-Host "Deploying PodMonitor for metrics collection..." -ForegroundColor Cyan
+    kubectl apply -f $podMonitorFile
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✓ PodMonitor deployed" -ForegroundColor Green
+    } else {
+        Write-Host "  ✗ Failed to deploy PodMonitor" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "  ✗ podmonitor.yaml not found in manifests/app/" -ForegroundColor Red
+    exit 1
+}
+
+# ========================================
+# Installation Complete!
+# ========================================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "Installation Complete!" -ForegroundColor Magenta
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host ""
+
+Write-Host "The LGTM Stack has been successfully installed!" -ForegroundColor Green
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Cyan
+Write-Host "  1. Get Grafana admin password:"
+Write-Host "     kubectl get secret --namespace $Namespace lgtm-grafana -o jsonpath=`"{.data.admin-password}`" | Out-String | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(`$_)) }"
+Write-Host ""
+Write-Host "  2. Access Grafana:"
+Write-Host '     [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((kubectl get secret --namespace monitoring lgtm-grafana -o jsonpath="{.data.admin-password}")))'
+Write-Host "     kubectl port-forward svc/lgtm-grafana 3000:80 -n $Namespace"
+Write-Host "     Open browser: http://localhost:3000"
+Write-Host "     Username: admin"
+Write-Host ""
+Write-Host "  3. Test services:"
+Write-Host "     .\test-services.ps1"
