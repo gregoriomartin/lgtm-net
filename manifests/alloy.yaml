@@ -5,54 +5,40 @@ metadata:
   name: alloy-config
 data:
   config.alloy: |
-    // Discover Kubernetes pods
     discovery.kubernetes "pods" {
       role = "pod"
     }
 
-    // Relabel discovered targets to focus on specific pods
-    discovery.relabel "logging_app" {
+    discovery.relabel "all_pods" {
       targets = discovery.kubernetes.pods.targets
 
-      // Only target pods with the logging-app label
-      rule {
-        source_labels = ["__meta_kubernetes_pod_label_app"]
-        regex         = "logging-app"
-        action        = "keep"
-      }
-
-      // Set job label
       rule {
         source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
         separator     = "/"
         target_label  = "job"
       }
 
-      // Set namespace label
       rule {
         source_labels = ["__meta_kubernetes_namespace"]
         target_label  = "namespace"
       }
 
-      // Set pod label
       rule {
         source_labels = ["__meta_kubernetes_pod_name"]
         target_label  = "pod"
       }
 
-      // Set container label
       rule {
         source_labels = ["__meta_kubernetes_pod_container_name"]
         target_label  = "container"
       }
 
-      // Set app label from pod label
       rule {
-        source_labels = ["__meta_kubernetes_pod_label_app"]
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name", "__meta_kubernetes_pod_label_app", "__meta_kubernetes_pod_name"]
+        regex         = "^;*([^;]+)(;.*)?$"
         target_label  = "app"
       }
 
-      // Set the path to read logs from stdout
       rule {
         source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
         separator     = "/"
@@ -62,9 +48,15 @@ data:
       }
     }
 
-    // Read logs from the discovered targets
     loki.source.kubernetes "pods" {
-      targets    = discovery.relabel.logging_app.output
+      targets    = discovery.relabel.all_pods.output
+      forward_to = [loki.process.docker_logs.receiver]
+    }
+
+    loki.process "docker_logs" {
+      // Parse Docker container logs
+      stage.docker {}
+
       forward_to = [loki.write.loki.receiver]
     }
 

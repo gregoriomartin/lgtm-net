@@ -67,26 +67,26 @@ if (Test-Path $otelFile) {
 }
 
 # ========================================
-# STEP 3: Uninstall Promtail
+# STEP 3: Uninstall Alloy
 # ========================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "Uninstalling Promtail" -ForegroundColor Magenta
+Write-Host "Uninstalling Alloy" -ForegroundColor Magenta
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
-$promtailFile = Join-Path $PSScriptRoot ".." "manifests" "promtail.yaml"
-if (Test-Path $promtailFile) {
-    Write-Host "Removing Promtail..." -ForegroundColor Cyan
-    kubectl delete -f $promtailFile 2>$null
+$alloyFile = Join-Path $PSScriptRoot ".." "manifests" "alloy.yaml"
+if (Test-Path $alloyFile) {
+    Write-Host "Removing Alloy..." -ForegroundColor Cyan
+    kubectl delete -f $alloyFile 2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "  ✓ Promtail removed" -ForegroundColor Green
+        Write-Host "  ✓ Alloy removed" -ForegroundColor Green
     } else {
-        Write-Host "  ✓ Promtail not found or already removed" -ForegroundColor Yellow
+        Write-Host "  ✓ Alloy not found or already removed" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "  ✓ Promtail manifest not found" -ForegroundColor Yellow
+    Write-Host "  ✓ Alloy manifest not found" -ForegroundColor Yellow
 }
 
 # ========================================
