@@ -56,8 +56,6 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
-        - name: app-logs
-          mountPath: /app/logs
         - name: appsettings
           mountPath: /app/appsettings.json
           subPath: appsettings.json
@@ -73,9 +71,6 @@ spec:
         - containerPort: 12345
           name: alloy-http
         volumeMounts:
-        - name: app-logs
-          mountPath: /app/logs
-          readOnly: true
         - name: alloy-config-volume
           mountPath: /etc/alloy
         resources:
@@ -85,76 +80,14 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "100m"
+
       volumes:
-      - name: app-logs
-        emptyDir: {}
       - name: appsettings
         configMap:
           name: logging-app-config
       - name: alloy-config-volume
         configMap:
           name: alloy-sidecar-config
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: alloy-sidecar-config
-data:
-  config.alloy: |
-    // Alloy sidecar configuration for JSON log collection
-    
-    // Loki write component
-    loki.write "loki" {
-      endpoint {
-        url = "http://lgtm-loki-distributor.monitoring.svc:3100/loki/api/v1/push"
-      }
-    }
-    
-    // Read JSON log files directly with specific filename pattern
-    loki.source.file "json_logs" {
-      targets = [{
-        __path__ = "/app/logs/logging-app-*.json",
-        job = "logging-app",
-        app = "logging-app", 
-        namespace = "default",
-      }]
-      forward_to = [loki.process.json_parser.receiver]
-    }
-    
-    // Parse JSON logs and add labels
-    loki.process "json_parser" {
-      forward_to = [loki.write.loki.receiver]
-      
-      stage.json {
-        expressions = {
-          level         = "[\"@l\"]",
-          timestamp     = "[\"@t\"]",
-          message       = "[\"@mt\"]",
-          source      = "SourceContext",
-          machine     = "MachineName",
-          environment = "Environment",
-          application = "Application",
-          connection_id = "ConnectionId",
-        }
-      }
-      
-      // Add level as a label
-      stage.labels {
-        values = {
-          level       = "level",
-          source      = "source", 
-          application = "application",
-          environment = "environment",
-        }
-      }
-      
-      // Format timestamp if available
-      stage.timestamp {
-        source = "timestamp"
-        format = "RFC3339"
-      }
-    }
-
 ---
 apiVersion: v1
 kind: Service
@@ -251,4 +184,64 @@ data:
       },
       "AllowedHosts": "*",
       "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-sidecar-config
+data:
+  config.alloy: |
+    // Alloy sidecar configuration for JSON log collection from stdout
+
+    loki.write "loki" {
+      endpoint {
+        url = "http://lgtm-loki-distributor.monitoring.svc:3100/loki/api/v1/push"
+      }
+    }
+
+    // Discover pods in the current namespace
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces = ["default"]
+    }
+
+    // Read logs from the logging-app container in this pod
+    loki.source.kubernetes "app_logs" {
+      targets = discovery.kubernetes.pods.targets
+      containers = ["logging-app"]
+      namespaces = ["default"]
+      forward_to = [loki.process.json_parser.receiver]
+    }
+
+    // Parse JSON log lines
+    loki.process "json_parser" {
+      forward_to = [loki.write.loki.receiver]
+
+      stage.json {
+        expressions = {
+          level         = "[\"@l\"]",
+          timestamp     = "[\"@t\"]",
+          message       = "[\"@mt\"]",
+          source        = "SourceContext",
+          machine       = "MachineName",
+          environment   = "Environment",
+          application   = "Application",
+          connection_id = "ConnectionId",
+        }
+      }
+
+      stage.labels {
+        values = {
+          level       = "level",
+          source      = "source",
+          application = "application",
+          environment = "environment",
+        }
+      }
+
+      stage.timestamp {
+        source = "timestamp"
+        format = "RFC3339"
+      }
     }
