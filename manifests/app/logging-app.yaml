@@ -64,34 +64,10 @@ spec:
           mountPath: /app/appsettings.Development.json
           subPath: appsettings.json
           readOnly: true
-      - name: alloy-sidecar
-        image: grafana/alloy:latest
-        args:
-          - "run"
-          - "/etc/alloy/config.alloy"
-          - "--server.http.listen-addr=0.0.0.0:12345"
-          - "--storage.path=/tmp/alloy"
-        ports:
-        - containerPort: 12345
-          name: alloy-http
-        volumeMounts:
-        - name: alloy-config-volume
-          mountPath: /etc/alloy
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-          limits:
-            memory: "128Mi"
-            cpu: "100m"
-
       volumes:
       - name: appsettings
         configMap:
           name: logging-app-config
-      - name: alloy-config-volume
-        configMap:
-          name: alloy-sidecar-config
 ---
 apiVersion: v1
 kind: Service
@@ -189,41 +165,4 @@ data:
       },
       "AllowedHosts": "*",
       "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318"
-    }
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: alloy-sidecar-config
-data:
-  config.alloy: |
-    discovery.kubernetes "pods" {
-      role = "pod"
-      namespaces {
-        names = ["default"]
-      }
-    }
-
-    // Keep only targets for the logging-app pod - simplified for debugging
-    discovery.relabel "logging_app" {
-      targets = discovery.kubernetes.pods.targets
-
-      // Only keep pods with app=logging-app label
-      rule {
-        action        = "keep"
-        source_labels = ["__meta_kubernetes_pod_label_app"]
-        regex         = "logging-app"
-      }
-    }
-
-    // Tail stdout from the filtered targets  
-    loki.source.kubernetes "app_logs" {
-      targets    = discovery.relabel.logging_app.output
-      forward_to = [loki.write.loki.receiver]
-    }
-
-    loki.write "loki" {
-      endpoint {
-        url = "http://lgtm-loki-distributor.monitoring.svc:3100/loki/api/v1/push"
-      }
     }
