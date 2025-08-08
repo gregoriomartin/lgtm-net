@@ -62,12 +62,99 @@ spec:
           mountPath: /app/appsettings.json
           subPath: appsettings.json
           readOnly: true
+      - name: alloy-sidecar
+        image: grafana/alloy:latest
+        args:
+          - "run"
+          - "/etc/alloy/config.alloy"
+          - "--server.http.listen-addr=0.0.0.0:12345"
+          - "--storage.path=/tmp/alloy"
+        ports:
+        - containerPort: 12345
+          name: alloy-http
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+          readOnly: true
+        - name: alloy-config-volume
+          mountPath: /etc/alloy
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
       volumes:
       - name: app-logs
         emptyDir: {}
       - name: appsettings
         configMap:
           name: logging-app-config
+      - name: alloy-config-volume
+        configMap:
+          name: alloy-sidecar-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-sidecar-config
+data:
+  config.alloy: |
+    // Alloy sidecar configuration for JSON log collection
+    
+    // Loki write component
+    loki.write "loki" {
+      endpoint {
+        url = "http://lgtm-loki-distributor.monitoring.svc:3100/loki/api/v1/push"
+      }
+    }
+    
+    // Read JSON log files directly with specific filename pattern
+    loki.source.file "json_logs" {
+      targets = [{
+        __path__ = "/app/logs/logging-app-*.json",
+        job = "logging-app",
+        app = "logging-app", 
+        namespace = "default",
+      }]
+      forward_to = [loki.process.json_parser.receiver]
+    }
+    
+    // Parse JSON logs and add labels
+    loki.process "json_parser" {
+      forward_to = [loki.write.loki.receiver]
+      
+      stage.json {
+        expressions = {
+          level         = "[\"@l\"]",
+          timestamp     = "[\"@t\"]",
+          message       = "[\"@mt\"]",
+          source      = "SourceContext",
+          machine     = "MachineName",
+          environment = "Environment",
+          application = "Application",
+          connection_id = "ConnectionId",
+        }
+      }
+      
+      // Add level as a label
+      stage.labels {
+        values = {
+          level       = "level",
+          source      = "source", 
+          application = "application",
+          environment = "environment",
+        }
+      }
+      
+      // Format timestamp if available
+      stage.timestamp {
+        source = "timestamp"
+        format = "RFC3339"
+      }
+    }
+
 ---
 apiVersion: v1
 kind: Service
@@ -128,15 +215,7 @@ data:
           {
             "Name": "Console",
             "Args": {
-              "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}<s:{SourceContext}>{Properties:j}{NewLine}{Exception}"
-            }
-          },
-          {
-            "Name": "File",
-            "Args": {
-              "path": "app/logs/logging-app-.json",
-              "rollingInterval": "Day",
-              "formatter": "Serilog.Formatting.Compact.CompactJsonFormatter, Serilog.Formatting.Compact",
+              "formatter": "Serilog.Formatting.Compact.CompactJsonFormatter, Serilog.Formatting.Compact"
             }
           }
         ],
@@ -167,7 +246,7 @@ data:
         ],
         "Properties": {
           "Application": "LoggingApp",
-          "Environment": "Development"
+          "Environment": "Production"
         }
       },
       "AllowedHosts": "*",

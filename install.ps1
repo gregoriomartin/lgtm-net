@@ -241,12 +241,12 @@ if (Test-Path $otelFile) {
     Write-Host "  ✓ OpenTelemetry Collector deployed" -ForegroundColor Green
 }
 
-# Deploy Promtail
-$promtailFile = Join-Path $manifestsPath "promtail.yaml"
-if (Test-Path $promtailFile) {
-    Write-Host "Deploying Promtail..." -ForegroundColor Cyan
-    kubectl apply -f $promtailFile
-    Write-Host "  ✓ Promtail deployed" -ForegroundColor Green
+# Deploy Alloy
+$alloyFile = Join-Path $manifestsPath "alloy.yaml"
+if (Test-Path $alloyFile) {
+    Write-Host "Deploying Alloy..." -ForegroundColor Cyan
+    kubectl apply -f $alloyFile
+    Write-Host "  ✓ Alloy deployed" -ForegroundColor Green
 }
 
 # ========================================
