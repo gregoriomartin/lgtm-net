@@ -60,6 +60,10 @@ spec:
           mountPath: /app/appsettings.json
           subPath: appsettings.json
           readOnly: true
+        - name: appsettings
+          mountPath: /app/appsettings.Development.json
+          subPath: appsettings.json
+          readOnly: true
       - name: alloy-sidecar
         image: grafana/alloy:latest
         args:
@@ -155,6 +159,7 @@ data:
         "Using": [
           "Serilog.Sinks.Console",
           "Serilog.Sinks.File",
+          "Serilog.Formatting.Compact",
           "Serilog.Enrichers.Environment",
           "Serilog.Enrichers.HttpContext",
           "Serilog.Enrichers.Thread",
@@ -192,56 +197,33 @@ metadata:
   name: alloy-sidecar-config
 data:
   config.alloy: |
-    // Alloy sidecar configuration for JSON log collection from stdout
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces {
+        names = ["default"]
+      }
+    }
+
+    // Keep only targets for the logging-app pod - simplified for debugging
+    discovery.relabel "logging_app" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Only keep pods with app=logging-app label
+      rule {
+        action        = "keep"
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        regex         = "logging-app"
+      }
+    }
+
+    // Tail stdout from the filtered targets  
+    loki.source.kubernetes "app_logs" {
+      targets    = discovery.relabel.logging_app.output
+      forward_to = [loki.write.loki.receiver]
+    }
 
     loki.write "loki" {
       endpoint {
         url = "http://lgtm-loki-distributor.monitoring.svc:3100/loki/api/v1/push"
-      }
-    }
-
-    // Discover pods in the current namespace
-    discovery.kubernetes "pods" {
-      role = "pod"
-      namespaces = ["default"]
-    }
-
-    // Read logs from the logging-app container in this pod
-    loki.source.kubernetes "app_logs" {
-      targets = discovery.kubernetes.pods.targets
-      containers = ["logging-app"]
-      namespaces = ["default"]
-      forward_to = [loki.process.json_parser.receiver]
-    }
-
-    // Parse JSON log lines
-    loki.process "json_parser" {
-      forward_to = [loki.write.loki.receiver]
-
-      stage.json {
-        expressions = {
-          level         = "[\"@l\"]",
-          timestamp     = "[\"@t\"]",
-          message       = "[\"@mt\"]",
-          source        = "SourceContext",
-          machine       = "MachineName",
-          environment   = "Environment",
-          application   = "Application",
-          connection_id = "ConnectionId",
-        }
-      }
-
-      stage.labels {
-        values = {
-          level       = "level",
-          source      = "source",
-          application = "application",
-          environment = "environment",
-        }
-      }
-
-      stage.timestamp {
-        source = "timestamp"
-        format = "RFC3339"
       }
     }
